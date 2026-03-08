@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>סופר קייפופ</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
+        html, body { width:100%; height:100%; overflow:hidden; background:#000; font-family:-apple-system,'Heebo',Arial,sans-serif; }
+        canvas { display:block; position:absolute; inset:0; }
+
+        /* ── OVERLAYS ── */
+        .ov {
+            position:fixed; inset:0; display:flex; flex-direction:column;
+            align-items:center; justify-content:center; gap:14px; padding:28px 22px;
+            background:rgba(8,0,28,0.88);
+        }
+        .ov.hidden { display:none; }
+        .ov-icon  { font-size:clamp(60px,12vw,80px); line-height:1; }
+        .ov-title { font-size:clamp(1.8rem,5vw,3rem); font-weight:900; color:#fff; text-align:center; text-shadow:0 0 24px #FF69B4; }
+        .ov-sub   { font-size:clamp(0.9rem,2.5vw,1.1rem); color:rgba(255,255,255,0.82); text-align:center; line-height:1.6; max-width:380px; }
+        .ov-score { font-size:clamp(1.1rem,3vw,1.4rem); color:#FFD700; font-weight:800; text-align:center; }
+
+        .ov-btn {
+            font-family:inherit; border:none; border-radius:18px;
+            font-size:clamp(1rem,3vw,1.25rem); font-weight:800;
+            cursor:pointer; padding:15px 30px; width:100%; max-width:300px;
+            transition:transform 0.12s; touch-action:manipulation;
+        }
+        .ov-btn:active { transform:scale(0.94); }
+        .ov-btn-pink  { background:#FF69B4; color:#fff; box-shadow:0 6px 22px rgba(255,105,180,0.55); }
+        .ov-btn-ghost { background:rgba(255,255,255,0.14); color:#fff; border:2px solid rgba(255,255,255,0.3); }
+
+        .name-input {
+            width:100%; max-width:300px; padding:14px 18px;
+            border-radius:15px; border:none; font-size:1rem; text-align:center;
+            outline:none; font-family:inherit; font-weight:600; color:#333;
+            box-shadow:0 4px 16px rgba(0,0,0,0.2);
+        }
+        .name-input::placeholder { color:#aaa; }
+
+        /* Leaderboard */
+        .lb-wrap { width:100%; max-width:420px; background:rgba(255,255,255,0.1); border-radius:18px; overflow:hidden; }
+        .lb-row  { display:grid; grid-template-columns:44px 1fr 90px; align-items:center; padding:11px 16px; color:#fff; font-size:0.95rem; border-bottom:1px solid rgba(255,255,255,0.08); }
+        .lb-row:last-child { border-bottom:none; }
+        .lb-header { font-weight:800; background:rgba(255,255,255,0.16); font-size:0.85em; }
+        .lb-empty  { color:rgba(255,255,255,0.65); text-align:center; padding:26px; }
+
+        /* ── HUD ── */
+        #hud {
+            position:fixed; top:0; left:0; right:0;
+            display:flex; justify-content:space-between; align-items:center;
+            padding:14px 20px;
+            background:linear-gradient(to bottom,rgba(0,0,0,0.55) 0%,transparent 100%);
+            pointer-events:none; direction:ltr;
+        }
+        #hud.hidden { display:none; }
+        .hud-item { color:#fff; font-weight:800; font-size:clamp(0.9rem,2.5vw,1.05rem); text-shadow:0 1px 5px rgba(0,0,0,0.6); }
+
+        /* ── TOUCH CONTROLS ── */
+        #ctrls {
+            position:fixed; bottom:0; left:0; right:0;
+            display:flex; justify-content:space-between; align-items:flex-end;
+            padding:0 20px 24px; pointer-events:none; direction:ltr;
+        }
+        #ctrls.active { pointer-events:all; }
+        .ctrl-grp { display:flex; gap:14px; align-items:flex-end; }
+        .ctrl-btn {
+            width:clamp(62px,13vw,78px); height:clamp(62px,13vw,78px);
+            border-radius:50%; background:rgba(255,255,255,0.16);
+            border:2px solid rgba(255,255,255,0.32);
+            display:flex; align-items:center; justify-content:center;
+            font-size:clamp(1.5rem,4vw,2rem); color:#fff;
+            touch-action:none; cursor:pointer; transition:background 0.1s;
+        }
+        .ctrl-btn.pressed { background:rgba(255,105,180,0.5); border-color:#FF69B4; }
+        .ctrl-jump {
+            width:clamp(74px,15vw,90px); height:clamp(74px,15vw,90px);
+            background:rgba(255,105,180,0.22); border-color:#FF69B4;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+    <div class="hud-item">&#11088; <span id="hudScore">0</span></div>
+    <div class="hud-item">&#127381; <span id="hudLevel">1</span>/3</div>
+    <div class="hud-item"><span id="hudLives">&#10084;&#10084;&#10084;</span></div>
+</div>
+
+<!-- TOUCH CONTROLS -->
+<div id="ctrls">
+    <div class="ctrl-grp">
+        <div class="ctrl-btn" id="btnL">&#9664;</div>
+        <div class="ctrl-btn" id="btnR">&#9654;</div>
+    </div>
+    <div class="ctrl-btn ctrl-jump" id="btnJ">&#9650;</div>
+</div>
+
+<!-- TITLE -->
+<div class="ov" id="ovTitle">
+    <div class="ov-icon">&#128131;</div>
+    <h1 class="ov-title">סופר קייפופ</h1>
+    <p class="ov-sub">ציידות השדים<br>עזרי למינה לעבור את 3 השלבים ולהביס את השדים!</p>
+    <div style="font-size:0.9rem;color:rgba(255,255,255,0.6);text-align:center">&#9650; קפוץ &nbsp;|&nbsp; &#9664;&#9654; זוז &nbsp;|&nbsp; נחת על שד = &#128128;</div>
+    <button class="ov-btn ov-btn-pink"  onclick="startGame()">&#9654; התחל</button>
+    <button class="ov-btn ov-btn-ghost" onclick="showKpopLeaderboard()">&#127942; לוח תוצאות</button>
+    <button class="ov-btn ov-btn-ghost" onclick="window.location.href='index.html'">&#127968; תפריט ראשי</button>
+</div>
+
+<!-- LEVEL COMPLETE -->
+<div class="ov hidden" id="ovLC">
+    <div class="ov-icon">&#127881;</div>
+    <h2 class="ov-title" style="font-size:clamp(1.6rem,4vw,2.4rem)">שלב הושלם!</h2>
+    <p class="ov-score" id="lcScore"></p>
+    <button class="ov-btn ov-btn-pink" id="lcBtn" onclick="nextLevel()">שלב הבא &#9654;</button>
+</div>
+
+<!-- GAME OVER -->
+<div class="ov hidden" id="ovGO">
+    <div class="ov-icon">&#128128;</div>
+    <h2 class="ov-title">נגמרו החיים!</h2>
+    <p class="ov-score">ניקוד: <span id="goScore"></span></p>
+    <button class="ov-btn ov-btn-pink"  onclick="startGame()">&#8635; נסה שוב</button>
+    <button class="ov-btn ov-btn-ghost" onclick="window.location.href='index.html'">&#127968; תפריט ראשי</button>
+</div>
+
+<!-- WIN -->
+<div class="ov hidden" id="ovWin">
+    <div class="ov-icon">&#127942;</div>
+    <h2 class="ov-title">ניצחת!</h2>
+    <p class="ov-sub">כל השדים הובסו! הכוכבות חזרו לבמה!</p>
+    <p class="ov-score">ניקוד סופי: <span id="winScore"></span></p>
+    <input type="text" class="name-input" id="winName" placeholder="הכנסי את שמך..." maxlength="20">
+    <button class="ov-btn ov-btn-pink"  onclick="saveKpopScore()">&#128190; שמור תוצאה</button>
+    <button class="ov-btn ov-btn-ghost" onclick="startGame()">&#8635; שחק שוב</button>
+    <button class="ov-btn ov-btn-ghost" onclick="window.location.href='index.html'">&#127968; תפריט ראשי</button>
+</div>
+
+<!-- LEADERBOARD -->
+<div class="ov hidden" id="ovLB">
+    <div class="ov-icon">&#127942;</div>
+    <h2 class="ov-title" style="font-size:clamp(1.5rem,4vw,2rem)">לוח התוצאות</h2>
+    <div class="lb-wrap" id="lbContent"></div>
+    <button class="ov-btn ov-btn-pink" onclick="hideAll();showEl('ovTitle')">&#9664; חזור</button>
+</div>
+
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H, GY; // GY = ground Y
+
+function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    GY = H - 72;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
+const GRAV    = 0.55;
+const MAX_VY  = 18;
+const JUMP_VY = -13.5;
+const P_SPD   = 5;
+const E_SPD   = 1.8;
+const PW = 36, PH = 44;  // player w/h
+const EW = 34, EH = 40;  // enemy  w/h
+const SW = 24, SH = 24;  // star   w/h
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let phase    = 'title';   // title | playing | levelComplete | gameOver | win
+let levelIdx = 0;
+let score    = 0;
+let lives    = 3;
+let camX     = 0;
+let jumpReq  = false;
+let platforms, enemies, stars, goalX, levelW;
+let bgTop, bgBot, groundCol, platCol;
+
+const keys = { left:false, right:false };
+
+// ── PLAYER ────────────────────────────────────────────────────────────────────
+const P = { x:80, y:0, vx:0, vy:0, onGround:false, inv:0, facing:1 };
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+function bindControls() {
+    function hold(btn, key) {
+        const el = document.getElementById(btn);
+        el.addEventListener('touchstart', e => { e.preventDefault(); keys[key]=true;  el.classList.add('pressed'); },    {passive:false});
+        el.addEventListener('touchend',   e => { e.preventDefault(); keys[key]=false; el.classList.remove('pressed'); }, {passive:false});
+        el.addEventListener('touchcancel',e => { e.preventDefault(); keys[key]=false; el.classList.remove('pressed'); }, {passive:false});
+    }
+    hold('btnL','left');
+    hold('btnR','right');
+
+    const jBtn = document.getElementById('btnJ');
+    jBtn.addEventListener('touchstart', e => { e.preventDefault(); jumpReq=true; jBtn.classList.add('pressed'); },    {passive:false});
+    jBtn.addEventListener('touchend',   e => { e.preventDefault(); jBtn.classList.remove('pressed'); }, {passive:false});
+
+    window.addEventListener('keydown', e => {
+        if (e.key==='ArrowLeft'  || e.key==='a') keys.left  = true;
+        if (e.key==='ArrowRight' || e.key==='d') keys.right = true;
+        if ((e.key==='ArrowUp'||e.key==='w'||e.key===' ') && !e.repeat) jumpReq = true;
+    });
+    window.addEventListener('keyup', e => {
+        if (e.key==='ArrowLeft'  || e.key==='a') keys.left  = false;
+        if (e.key==='ArrowRight' || e.key==='d') keys.right = false;
+    });
+}
+
+// ── LEVEL DEFINITIONS ─────────────────────────────────────────────────────────
+function buildLevel(idx) {
+    const G = GY;
+    const defs = [
+        // ── Level 1: Concert Stage ────────────────────────────────────────────
+        {
+            name:'במת הכוכבות', bgTop:'#120033', bgBot:'#5a1a99',
+            groundCol:'#7B45B0', platCol:'#B880F0', levelW:4000, goalX:3750,
+            plats:[
+                {x:260,  y:G-155, w:200, h:18},
+                {x:540,  y:G-235, w:155, h:18},
+                {x:790,  y:G-165, w:180, h:18},
+                {x:1060, y:G-280, w:160, h:18},
+                {x:1310, y:G-180, w:200, h:18},
+                {x:1590, y:G-255, w:175, h:18},
+                {x:1870, y:G-170, w:155, h:18},
+                {x:2110, y:G-295, w:195, h:18},
+                {x:2410, y:G-185, w:160, h:18},
+                {x:2660, y:G-265, w:200, h:18},
+                {x:2960, y:G-160, w:180, h:18},
+                {x:3220, y:G-240, w:155, h:18},
+                {x:3470, y:G-160, w:200, h:18},
+            ],
+            enems:[
+                {x:430,  minX:260,  maxX:700,  spd:E_SPD},
+                {x:950,  minX:800,  maxX:1140, spd:E_SPD},
+                {x:1720, minX:1520, maxX:1920, spd:E_SPD*1.15},
+                {x:2850, minX:2660, maxX:3100, spd:E_SPD*1.1},
+            ],
+            stars:[
+                {x:310,y:G-196},{x:585,y:G-276},{x:840,y:G-206},
+                {x:1100,y:G-321},{x:1360,y:G-221},{x:1640,y:G-296},
+                {x:1920,y:G-211},{x:2160,y:G-336},{x:2700,y:G-306},
+                {x:3260,y:G-281},{x:3510,y:G-201},
+            ],
+        },
+        // ── Level 2: Demon City ───────────────────────────────────────────────
+        {
+            name:'עיר השדים', bgTop:'#0a1520', bgBot:'#1a3550',
+            groundCol:'#2a1a38', platCol:'#5a4080', levelW:4600, goalX:4350,
+            plats:[
+                {x:200,  y:G-200, w:145, h:18},
+                {x:440,  y:G-310, w:115, h:18},
+                {x:660,  y:G-188, w:168, h:18},
+                {x:940,  y:G-328, w:118, h:18},
+                {x:1160, y:G-218, w:158, h:18},
+                {x:1450, y:G-298, w:148, h:18},
+                {x:1710, y:G-188, w:128, h:18},
+                {x:1975, y:G-290, w:168, h:18},
+                {x:2280, y:G-188, w:138, h:18},
+                {x:2540, y:G-328, w:158, h:18},
+                {x:2850, y:G-198, w:148, h:18},
+                {x:3140, y:G-288, w:138, h:18},
+                {x:3450, y:G-168, w:200, h:18},
+                {x:3760, y:G-280, w:155, h:18},
+            ],
+            enems:[
+                {x:310,  minX:200,  maxX:540,  spd:E_SPD},
+                {x:780,  minX:660,  maxX:960,  spd:E_SPD*1.2},
+                {x:1300, minX:1160, maxX:1510, spd:E_SPD},
+                {x:1875, minX:1710, maxX:2070, spd:E_SPD*1.25},
+                {x:2720, minX:2540, maxX:2920, spd:E_SPD*1.3},
+                {x:3640, minX:3450, maxX:3820, spd:E_SPD*1.2},
+            ],
+            stars:[
+                {x:240,y:G-241},{x:480,y:G-351},{x:700,y:G-229},
+                {x:980,y:G-369},{x:1200,y:G-259},{x:1490,y:G-339},
+                {x:2020,y:G-331},{x:2580,y:G-369},{x:3180,y:G-329},
+                {x:3800,y:G-321},
+            ],
+        },
+        // ── Level 3: Demon Lair ───────────────────────────────────────────────
+        {
+            name:'לוע השד', bgTop:'#280000', bgBot:'#600808',
+            groundCol:'#380808', platCol:'#903030', levelW:5200, goalX:4950,
+            plats:[
+                {x:180,  y:G-218, w:128, h:18},
+                {x:395,  y:G-348, w:98,  h:18},
+                {x:585,  y:G-198, w:148, h:18},
+                {x:850,  y:G-308, w:118, h:18},
+                {x:1080, y:G-188, w:158, h:18},
+                {x:1380, y:G-328, w:128, h:18},
+                {x:1620, y:G-208, w:138, h:18},
+                {x:1905, y:G-288, w:118, h:18},
+                {x:2205, y:G-198, w:158, h:18},
+                {x:2525, y:G-338, w:138, h:18},
+                {x:2835, y:G-188, w:158, h:18},
+                {x:3140, y:G-308, w:128, h:18},
+                {x:3435, y:G-208, w:178, h:18},
+                {x:3745, y:G-288, w:148, h:18},
+                {x:4060, y:G-178, w:158, h:18},
+                {x:4380, y:G-298, w:148, h:18},
+                {x:4660, y:G-188, w:200, h:18},
+            ],
+            enems:[
+                {x:280,  minX:180,  maxX:430,  spd:E_SPD*1.2},
+                {x:700,  minX:585,  maxX:840,  spd:E_SPD},
+                {x:1200, minX:1080, maxX:1390, spd:E_SPD*1.3},
+                {x:1830, minX:1620, maxX:2000, spd:E_SPD*1.2},
+                {x:2600, minX:2430, maxX:2820, spd:E_SPD*1.4},
+                {x:3520, minX:3330, maxX:3720, spd:E_SPD*1.3},
+                {x:4200, minX:4060, maxX:4440, spd:E_SPD*1.5},
+            ],
+            stars:[
+                {x:220,y:G-259},{x:435,y:G-389},{x:625,y:G-239},
+                {x:890,y:G-349},{x:1120,y:G-229},{x:1660,y:G-249},
+                {x:2245,y:G-239},{x:2875,y:G-229},{x:4100,y:G-219},
+                {x:4700,y:G-229},
+            ],
+        },
+    ];
+    return defs[idx];
+}
+
+// ── LOAD LEVEL ────────────────────────────────────────────────────────────────
+function loadLevel(idx) {
+    const def = buildLevel(idx);
+    bgTop     = def.bgTop;
+    bgBot     = def.bgBot;
+    groundCol = def.groundCol;
+    platCol   = def.platCol;
+    levelW    = def.levelW;
+    goalX     = def.goalX;
+
+    platforms = def.plats.map(p => ({...p}));
+    enemies   = def.enems.map(e => ({...e, y:GY-EH, dead:false, dir:1}));
+    stars     = def.stars.map(s => ({...s, collected:false}));
+
+    P.x=80; P.y=GY-PH; P.vx=0; P.vy=0;
+    P.onGround=true; P.inv=0; P.facing=1;
+    camX=0;
+    updateHUD();
+}
+
+// ── GAME START ────────────────────────────────────────────────────────────────
+function startGame() {
+    levelIdx=0; score=0; lives=3;
+    hideAll();
+    document.getElementById('hud').classList.remove('hidden');
+    document.getElementById('ctrls').classList.add('active');
+    phase='playing';
+    loadLevel(0);
+}
+
+// ── NEXT LEVEL ────────────────────────────────────────────────────────────────
+function nextLevel() {
+    levelIdx++;
+    if (levelIdx >= 3) {
+        document.getElementById('winScore').textContent = score;
+        document.getElementById('winName').value = '';
+        hideAll();
+        showEl('ovWin');
+        phase='win';
+    } else {
+        hideAll();
+        document.getElementById('hud').classList.remove('hidden');
+        document.getElementById('ctrls').classList.add('active');
+        phase='playing';
+        loadLevel(levelIdx);
+    }
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateHUD() {
+    document.getElementById('hudScore').textContent = score;
+    document.getElementById('hudLevel').textContent = levelIdx+1;
+    document.getElementById('hudLives').textContent = '❤️'.repeat(Math.max(0,lives));
+}
+
+// ── COLLISION ─────────────────────────────────────────────────────────────────
+function overlaps(ax,ay,aw,ah, bx,by,bw,bh) {
+    return ax<bx+bw && ax+aw>bx && ay<by+bh && ay+ah>by;
+}
+
+// ── UPDATE ────────────────────────────────────────────────────────────────────
+function update() {
+    if (phase !== 'playing') return;
+
+    // Horizontal
+    P.vx = 0;
+    if (keys.left)  { P.vx = -P_SPD; P.facing = -1; }
+    if (keys.right) { P.vx =  P_SPD; P.facing =  1; }
+
+    // Jump
+    if (jumpReq && P.onGround) P.vy = JUMP_VY;
+    jumpReq = false;
+
+    // Gravity
+    P.vy = Math.min(P.vy + GRAV, MAX_VY);
+
+    // Move
+    P.x += P.vx;
+    P.y += P.vy;
+
+    // Clamp X
+    P.x = Math.max(0, Math.min(P.x, levelW - PW));
+
+    // Ground
+    P.onGround = false;
+    if (P.y + PH >= GY) { P.y = GY-PH; P.vy=0; P.onGround=true; }
+
+    // Platforms
+    for (const p of platforms) {
+        if (overlaps(P.x,P.y,PW,PH, p.x,p.y,p.w,p.h)) {
+            const prevBot = (P.y - P.vy) + PH;
+            if (P.vy >= 0 && prevBot <= p.y + 10) {
+                P.y = p.y - PH;
+                P.vy = 0;
+                P.onGround = true;
+            }
+        }
+    }
+
+    // Enemies
+    for (const e of enemies) {
+        if (e.dead) continue;
+        e.x += e.spd * e.dir;
+        if (e.x <= e.minX || e.x + EW >= e.maxX) e.dir *= -1;
+
+        if (P.inv <= 0 && overlaps(P.x,P.y,PW,PH, e.x,e.y,EW,EH)) {
+            const prevBot = (P.y - P.vy) + PH;
+            if (P.vy > 0 && prevBot <= e.y + 14) {
+                // Stomp
+                e.dead = true;
+                P.vy = -9;
+                score += 50;
+                updateHUD();
+            } else {
+                // Damage
+                lives--;
+                updateHUD();
+                P.inv = 100;
+                P.vy = -7;
+                if (lives <= 0) triggerGameOver();
+            }
+        }
+    }
+
+    // Stars
+    for (const s of stars) {
+        if (!s.collected && overlaps(P.x,P.y,PW,PH, s.x-SW/2,s.y-SH/2,SW,SH)) {
+            s.collected = true;
+            score += 10;
+            updateHUD();
+        }
+    }
+
+    // Fall
+    if (P.y > H + 120) {
+        lives--;
+        updateHUD();
+        if (lives <= 0) {
+            triggerGameOver();
+        } else {
+            P.x = Math.max(80, camX + 80);
+            P.y = GY - PH;
+            P.vy = 0; P.vx = 0;
+            P.inv = 90;
+        }
+    }
+
+    // Goal
+    if (overlaps(P.x,P.y,PW,PH, goalX-30,GY-90,60,90)) {
+        phase = 'levelComplete';
+        const starsGot = stars.filter(s=>s.collected).length;
+        document.getElementById('lcScore').textContent =
+            `ניקוד: ${score}  |  כוכבות: ${starsGot}/${stars.length}`;
+        document.getElementById('lcBtn').textContent =
+            levelIdx>=2 ? '🏆 לסיום' : 'שלב הבא ▶';
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('ctrls').classList.remove('active');
+        showEl('ovLC');
+    }
+
+    // Invincibility
+    if (P.inv > 0) P.inv--;
+
+    // Camera
+    const targetCamX = P.x - W*0.32;
+    camX += (targetCamX - camX) * 0.1;
+    camX = Math.max(0, Math.min(camX, levelW - W));
+}
+
+function triggerGameOver() {
+    phase = 'gameOver';
+    document.getElementById('goScore').textContent = score;
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('ctrls').classList.remove('active');
+    hideAll();
+    showEl('ovGO');
+}
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw() {
+    // Background
+    const bg = ctx.createLinearGradient(0,0,0,H);
+    bg.addColorStop(0, bgTop||'#120033');
+    bg.addColorStop(1, bgBot||'#5a1a99');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0,0,W,H);
+
+    // Background stars sparkle
+    const t = Date.now();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    for (let i=0; i<30; i++) {
+        const sx = ((i*137 + t*0.02) % W);
+        const sy = ((i*97  + t*0.01) % (GY*0.7));
+        const sz = Math.sin(t/600 + i) * 1.5 + 2;
+        ctx.fillRect(sx, sy, sz, sz);
+    }
+
+    ctx.save();
+    ctx.translate(-Math.floor(camX), 0);
+
+    // Ground
+    ctx.fillStyle = groundCol||'#7B45B0';
+    ctx.fillRect(0, GY, levelW, H-GY);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(0, GY, levelW, 5);
+
+    // Platforms
+    for (const p of platforms) {
+        ctx.fillStyle = platCol||'#A870D8';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.fillRect(p.x+4, p.y, p.w-8, 4);
+    }
+
+    // Goal portal
+    ctx.font = '54px serif';
+    ctx.textAlign = 'center';
+    const portalBob = Math.sin(t/500)*5;
+    ctx.fillText('🌀', goalX, GY - 14 + portalBob);
+
+    // Stars (bouncing)
+    ctx.font = '26px serif';
+    const starBob = Math.sin(t/320)*4;
+    for (const s of stars) {
+        if (!s.collected) ctx.fillText('⭐', s.x, s.y + starBob);
+    }
+
+    // Enemies
+    ctx.font = EH + 'px serif';
+    for (const e of enemies) {
+        if (e.dead) continue;
+        ctx.save();
+        if (e.dir > 0) {
+            // flip to face movement direction
+            ctx.translate(e.x + EW/2, 0);
+            ctx.scale(-1,1);
+            ctx.fillText('👹', -EW/2, e.y+EH);
+        } else {
+            ctx.fillText('👹', e.x, e.y+EH);
+        }
+        ctx.restore();
+    }
+
+    // Player (flash when invincible)
+    if (P.inv===0 || Math.floor(P.inv/6)%2===0) {
+        ctx.font = PH + 'px serif';
+        ctx.save();
+        if (P.facing < 0) {
+            ctx.translate(P.x + PW/2, 0);
+            ctx.scale(-1,1);
+            ctx.fillText('💃', -PW/2, P.y+PH);
+        } else {
+            ctx.fillText('💃', P.x, P.y+PH);
+        }
+        ctx.restore();
+    }
+
+    ctx.restore();
+    ctx.textAlign = 'start';
+}
+
+// ── GAME LOOP ─────────────────────────────────────────────────────────────────
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+// ── LEADERBOARD ───────────────────────────────────────────────────────────────
+function showKpopLeaderboard() {
+    const scores = JSON.parse(localStorage.getItem('kpopScores')||'[]');
+    const el = document.getElementById('lbContent');
+    const medals = ['🥇','🥈','🥉'];
+    if (scores.length===0) {
+        el.innerHTML = '<div class="lb-empty">עדיין אין תוצאות!<br>היי הראשון!</div>';
+    } else {
+        let html = '<div class="lb-row lb-header"><div>#</div><div>שם</div><div>ניקוד</div></div>';
+        scores.forEach((s,i) => {
+            html += `<div class="lb-row"><div>${medals[i]!==undefined?medals[i]:(i+1)}</div><div>${s.name}</div><div>${s.score}</div></div>`;
+        });
+        el.innerHTML = html;
+    }
+    hideAll();
+    showEl('ovLB');
+}
+
+function saveKpopScore() {
+    const name = document.getElementById('winName').value.trim() || 'שחקנית אנונימית';
+    const scores = JSON.parse(localStorage.getItem('kpopScores')||'[]');
+    scores.push({name, score});
+    scores.sort((a,b) => b.score-a.score);
+    scores.splice(10);
+    localStorage.setItem('kpopScores', JSON.stringify(scores));
+    showKpopLeaderboard();
+}
+
+// ── UTILS ─────────────────────────────────────────────────────────────────────
+function hideAll() {
+    ['ovTitle','ovLC','ovGO','ovWin','ovLB'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+    });
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('ctrls').classList.remove('active');
+}
+function showEl(id) { document.getElementById(id).classList.remove('hidden'); }
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+bindControls();
+// Set default draw state for title screen
+bgTop='#120033'; bgBot='#5a1a99';
+groundCol='#7B45B0'; platCol='#B880F0';
+levelW=4000; goalX=3750;
+platforms=[]; enemies=[]; stars=[];
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
